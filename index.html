@@ -198,6 +198,28 @@
     .metric .label { color: var(--muted); font-size: .82rem; }
     .metric .label .label-with-help { color: var(--muted); font-weight: 750; }
     .metric .value { font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 800; margin-top: 6px; overflow-wrap: anywhere; }
+    .summary-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0 12px;
+    }
+    .summary-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 10px;
+    }
+    .summary-item .label {
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 700;
+    }
+    .summary-item .value {
+      margin-top: 4px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 9px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: .82rem; font-weight: 750; }
@@ -212,10 +234,17 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace; }
     .source-grid { display: grid; gap: 7px; }
     .source-grid a { color: var(--accent); overflow-wrap: anywhere; }
+    .disclaimer {
+      color: var(--muted);
+      border-left: 3px solid var(--warn);
+      padding-left: 10px;
+      margin: 10px 0 0;
+    }
     .hidden { display: none !important; }
     @media (max-width: 1020px) {
       .app-grid { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary-strip { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
       header { padding-top: 18px; }
@@ -411,6 +440,35 @@
         </section>
 
         <section class="panel">
+          <h2>GPU Reference</h2>
+          <div class="input-grid">
+            <label for="gpuHeadroom">Hardware headroom %
+              <input id="gpuHeadroom" type="number" min="0" step="1" value="10" />
+            </label>
+            <label for="gpuVendorFilter">Vendor filter
+              <select id="gpuVendorFilter">
+                <option value="all" selected>All vendors</option>
+                <option value="NVIDIA">NVIDIA</option>
+                <option value="AMD">AMD</option>
+                <option value="Intel">Intel</option>
+              </select>
+            </label>
+          </div>
+          <div class="summary-strip" id="gpuSummary"></div>
+          <div style="overflow:auto">
+            <table>
+              <thead>
+                <tr><th>GPU</th><th class="num">VRAM</th><th>Vendor</th><th>Notes</th></tr>
+              </thead>
+              <tbody id="gpuRecommendations"></tbody>
+            </table>
+          </div>
+          <div id="gpuStatus" class="status">Loading local GPU database...</div>
+          <p class="disclaimer">Hardware matches are VRAM-only references from the local GPU JSON database, not a guarantee. Real training can still fail because of kernels, drivers, framework overhead, fragmentation, unsupported dtypes, bandwidth, multi-GPU topology, or missing CUDA/ROCm support.</p>
+          <p class="muted">GPU database credit: <a href="https://github.com/voidful/gpu-info-api" target="_blank" rel="noreferrer">voidful/gpu-info-api</a>.</p>
+        </section>
+
+        <section class="panel">
           <h2>Sources</h2>
           <div class="source-grid">
             <a href="https://arxiv.org/abs/1910.02054" target="_blank" rel="noreferrer">ZeRO model-state accounting</a>
@@ -420,6 +478,7 @@
             <a href="https://arxiv.org/abs/2401.04088" target="_blank" rel="noreferrer">Mixtral active vs sparse parameter distinction</a>
             <a href="https://huggingface.co/docs/peft/developer_guides/quantization" target="_blank" rel="noreferrer">Hugging Face PEFT quantization</a>
             <a href="https://huggingface.co/docs/bitsandbytes/explanations/optimizers" target="_blank" rel="noreferrer">bitsandbytes optimizer behavior</a>
+            <a href="https://github.com/voidful/gpu-info-api" target="_blank" rel="noreferrer">GPU JSON database by voidful/gpu-info-api</a>
           </div>
         </section>
       </div>
@@ -434,11 +493,14 @@
       'topKExperts', 'sequenceLength', 'microBatch', 'activationMode', 'kernelScale',
       'customKernelScale', 'manualActivationGb', 'baseDtype', 'optimizerPreset',
       'overheadPercent', 'quantPreset', 'trainableOverride', 'extraTrainableParams',
-      'loraRank', 'loraAlpha'
+      'loraRank', 'loraAlpha', 'gpuHeadroom', 'gpuVendorFilter'
     ];
     let currentMethod = 'full';
     let lastFetchNotes = [];
     let floatingTooltip = null;
+    let gpuCatalog = [];
+    let gpuLoadMessage = 'Loading local GPU database...';
+    let lastEstimateBytes = 0;
 
     const optimizerPresets = {
       adamw_bf16: {
@@ -519,7 +581,9 @@
       trainableOverride: 'Optional direct trainable-parameter count. For LoRA/QLoRA it replaces calculated adapter params before extra trainables are added.',
       extraTrainableParams: 'Extra LoRA/QLoRA trainable parameters such as biases, new token embeddings, or a trainable head.',
       loraRank: 'LoRA rank r. Adapter parameters scale linearly with rank: r * (d_in + d_out) for each target matrix.',
-      loraAlpha: 'LoRA scaling value. It affects adapter output scaling during training, not parameter count or memory in this calculator.'
+      loraAlpha: 'LoRA scaling value. It affects adapter output scaling during training, not parameter count or memory in this calculator.',
+      gpuHeadroom: 'Extra VRAM margin added when matching GPUs. Helpful because the estimate is not a guaranteed peak measurement.',
+      gpuVendorFilter: 'Limit hardware suggestions to one GPU vendor, or show all vendors.'
     };
 
     const methodHelp = {
@@ -554,7 +618,8 @@
       'LoRA params': 'Calculated adapter parameter count from selected targets, rank, layers, and architecture.',
       'Active params display': 'Active parameter count shown for compute intuition, especially MoE. It does not reduce storage memory.',
       'LoRA active/token': 'MoE-aware estimate of adapter parameters active for one token. Storage still uses total adapter params.',
-      'Method': 'Currently selected training method.'
+      'Method': 'Currently selected training method.',
+      'GPU reference': 'VRAM-only hardware suggestions from the local gpu.json database.'
     };
 
     const breakdownHelp = {
@@ -699,6 +764,73 @@
 
     function hideFloatingTooltip() {
       if (floatingTooltip) floatingTooltip.classList.remove('visible');
+    }
+
+    async function loadGpuDatabase() {
+      try {
+        const data = await fetchJson('gpu.json');
+        const seen = new Set();
+        gpuCatalog = Object.entries(data)
+          .map(([id, entry]) => normalizeGpuEntry(id, entry))
+          .filter(Boolean)
+          .filter((gpu) => {
+            const key = [gpu.vendor, gpu.name, gpu.memoryGiB.toFixed(2)].join('|').toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .sort((a, b) => a.memoryGiB - b.memoryGiB || a.vendor.localeCompare(b.vendor) || a.name.localeCompare(b.name));
+        gpuLoadMessage = 'Loaded ' + gpuCatalog.length.toLocaleString() + ' GPU entries from gpu.json.';
+      } catch (error) {
+        gpuCatalog = [];
+        gpuLoadMessage = 'Could not load gpu.json: ' + error.message + '. If your browser blocks local JSON fetches, open the folder through a small local server.';
+      }
+      renderGpuReference(lastEstimateBytes);
+    }
+
+    function normalizeGpuEntry(id, entry) {
+      if (!entry || typeof entry !== 'object') return null;
+      const memoryGiB = extractGpuMemoryGiB(entry);
+      if (!Number.isFinite(memoryGiB) || memoryGiB <= 0.25) return null;
+      const name = firstCleanString(entry, ['Model Name', 'Model name', 'Model', 'Model (Code name)', 'Model (Codename)', 'Model (Code Name)']) || id;
+      const vendor = firstCleanString(entry, ['Vendor']) || id.split('_')[0] || 'Unknown';
+      const bandwidth = firstCleanString(entry, ['Memory Bandwidth (GB/s)']);
+      const memoryType = firstCleanString(entry, ['Memory Bus type', 'Memory Bus Type', 'Memory Bus type & width']);
+      const launch = firstCleanString(entry, ['Launch', 'Launch Date']);
+      const notes = [memoryType, bandwidth ? bandwidth + ' GB/s' : '', launch ? launch.slice(0, 10) : ''].filter(Boolean).join(' | ');
+      return { id, name, vendor, memoryGiB, notes };
+    }
+
+    function firstCleanString(entry, keys) {
+      for (const key of keys) {
+        const value = cleanGpuValue(entry[key]);
+        if (value) return value;
+      }
+      return '';
+    }
+
+    function cleanGpuValue(value) {
+      if (value === undefined || value === null) return '';
+      const text = String(value).trim();
+      if (!text || text.toLowerCase() === 'nan' || text === '-N/a') return '';
+      return text;
+    }
+
+    function extractGpuMemoryGiB(entry) {
+      return Math.max(
+        parseGpuMemoryValue(entry['Memory Size (GiB)'], 1),
+        parseGpuMemoryValue(entry['Memory Size (GB)'], 1),
+        parseGpuMemoryValue(entry['Memory Size (MB)'], 1 / 1024)
+      );
+    }
+
+    function parseGpuMemoryValue(value, scaleToGiB) {
+      if (Number.isFinite(value)) return Number(value) * scaleToGiB;
+      const text = cleanGpuValue(value);
+      if (!text || /system\s+ram/i.test(text) || /size\s*\(mb\)/i.test(text)) return 0;
+      const matches = text.replace(/,/g, '').match(/\d+(?:\.\d+)?/g);
+      if (!matches) return 0;
+      return Math.max(...matches.map(Number)) * scaleToGiB;
     }
 
     function toNumber(id, fallback = 0) {
@@ -874,6 +1006,7 @@
       const subtotal = baseWeightBytes + trainableWeightBytes + gradientBytes + masterBytes + optimizerBytes + activation;
       const overhead = subtotal * Math.max(0, toNumber('overheadPercent', 0)) / 100;
       const total = subtotal + overhead;
+      lastEstimateBytes = total;
 
       renderMetrics({ total, trainableParams, baseWeightBytes, activation, lora, arch });
       renderBreakdown([
@@ -887,7 +1020,52 @@
         ['Estimated total', total, 'Sum of all rows above']
       ]);
       renderAssumptions({ arch, optimizer, quant, lora, trainableParams });
+      renderGpuReference(total);
       updateVisibility();
+    }
+
+    function renderGpuReference(totalBytes) {
+      const summary = $('gpuSummary');
+      const body = $('gpuRecommendations');
+      const status = $('gpuStatus');
+      if (!summary || !body || !status) return;
+
+      const headroom = Math.max(0, toNumber('gpuHeadroom', 0));
+      const requiredGiB = totalBytes * (1 + headroom / 100) / (1024 ** 3);
+      const estimateGiB = totalBytes / (1024 ** 3);
+      const vendorFilter = $('gpuVendorFilter').value;
+
+      summary.innerHTML = [
+        ['Estimate', estimateGiB > 0 ? estimateGiB.toFixed(2) + ' GiB' : '0 GiB'],
+        ['With headroom', requiredGiB > 0 ? requiredGiB.toFixed(2) + ' GiB' : '0 GiB'],
+        ['Margin', headroom.toFixed(0) + '%']
+      ].map(([label, value]) => '<div class="summary-item"><div class="label">' + escapeHtml(label) + '</div><div class="value">' + escapeHtml(value) + '</div></div>').join('');
+
+      if (!gpuCatalog.length) {
+        body.innerHTML = '<tr><td colspan="4" class="muted">GPU database is not available yet.</td></tr>';
+        status.textContent = gpuLoadMessage;
+        return;
+      }
+
+      const filtered = gpuCatalog.filter((gpu) => vendorFilter === 'all' || gpu.vendor === vendorFilter);
+      const matches = filtered.filter((gpu) => gpu.memoryGiB >= requiredGiB);
+      const rows = (matches.length ? matches : filtered.slice().sort((a, b) => b.memoryGiB - a.memoryGiB)).slice(0, 12);
+
+      body.innerHTML = rows.map((gpu) => {
+        const note = matches.length ? gpu.notes : 'Largest available in selected filter; below requirement. ' + gpu.notes;
+        return '<tr><td>' + escapeHtml(gpu.name) + '</td><td class="num">' + escapeHtml(formatGpuMemory(gpu.memoryGiB)) + '</td><td>' + escapeHtml(gpu.vendor) + '</td><td>' + escapeHtml(note || '—') + '</td></tr>';
+      }).join('') || '<tr><td colspan="4" class="muted">No GPU entries match the selected vendor.</td></tr>';
+
+      const fitText = matches.length
+        ? 'Showing ' + Math.min(matches.length, 12) + ' closest VRAM matches out of ' + matches.length.toLocaleString() + ' suitable entries.'
+        : 'No single GPU in the selected filter meets the estimate plus headroom; showing the largest entries instead.';
+      status.textContent = gpuLoadMessage + ' ' + fitText;
+    }
+
+    function formatGpuMemory(gib) {
+      if (gib >= 100) return gib.toFixed(0) + ' GiB';
+      if (gib >= 10) return gib.toFixed(1).replace(/\.0$/, '') + ' GiB';
+      return gib.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + ' GiB';
     }
 
     function activationFormulaLabel(arch) {
@@ -1106,6 +1284,7 @@
     applyStaticHelp();
     setupFloatingTooltip();
     calculate();
+    loadGpuDatabase();
   </script>
 </body>
 </html>

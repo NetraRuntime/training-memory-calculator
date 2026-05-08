@@ -46,6 +46,7 @@ The exact set of terms depends on the finetuning method:
 - Full finetuning, LoRA, and QLoRA memory breakdowns.
 - Hugging Face metadata fetch with manual fallback.
 - Transparent activation estimates with checkpointing modes.
+- Local `gpu.json` hardware reference that compares the estimate with GPU VRAM.
 
 Not included in the current implementation:
 
@@ -54,6 +55,8 @@ Not included in the current implementation:
 - Exact CUDA allocator fragmentation or framework temporary-buffer prediction.
 - Exact MoE routing kernel memory. MoE storage is modeled; MoE activation memory
   remains an approximation unless manually overridden.
+- Hardware suitability beyond memory capacity, such as kernel support, bandwidth,
+  multi-GPU topology, driver/runtime support, or actual throughput.
 
 ## Notation
 
@@ -335,6 +338,30 @@ Fetched values are editable. If exact total parameter metadata is unavailable,
 the calculator can derive a rough decoder-only estimate from `config.json`, but it
 labels this as an estimate.
 
+## GPU Hardware Reference
+
+The browser UI can load a local `gpu.json` file and compare the estimated memory
+requirement against GPU memory capacity. The database format used by this project
+is credited to `voidful/gpu-info-api` [9].
+
+The hardware reference uses this intentionally simple rule:
+
+```text
+required_vram = estimated_total_memory * (1 + hardware_headroom_percent / 100)
+candidate_gpu_fits_if gpu_vram >= required_vram
+```
+
+For entries with several memory variants, such as `40 or 80 GB`, the calculator
+uses the largest listed capacity for that database entry. Entries that describe
+system RAM instead of dedicated VRAM are ignored.
+
+This is not a guarantee that training will run. It is a practical VRAM-only
+reference for hardware planning. Real runs still depend on the exact training
+script, kernel choices, CUDA or ROCm support, temporary buffers, allocator
+fragmentation, tensor parallelism, offload, data loader behavior, and framework
+versions. Use the listed GPUs as a starting point, then validate with a real
+training dry run and `torch.cuda.max_memory_allocated()`.
+
 ## Limitations
 
 The memory result is an estimate, not a replacement for measuring
@@ -353,6 +380,8 @@ Known sources of difference:
 - Whether embeddings, LM head, norms, biases, or newly added tokens are also
   trainable.
 - MoE routing implementation and expert parallelism.
+- GPU hardware reference is VRAM-only and does not prove kernel compatibility,
+  throughput, stability, or multi-GPU behavior.
 
 ## References
 
@@ -391,3 +420,6 @@ quantization." Accessed 2026-05-08.
 [https://huggingface.co/docs/bitsandbytes/explanations/optimizers](https://huggingface.co/docs/bitsandbytes/explanations/optimizers)
 and
 [https://huggingface.co/docs/bitsandbytes/main/en/reference/nn/linear4bit](https://huggingface.co/docs/bitsandbytes/main/en/reference/nn/linear4bit)
+
+[9] voidful. "gpu-info-api." GPU information JSON database. Accessed
+2026-05-08. [https://github.com/voidful/gpu-info-api](https://github.com/voidful/gpu-info-api)

@@ -23,6 +23,10 @@ model on one GPU. It separates memory into two broad groups:
 The main result is not a guarantee that a model will fit. It is a transparent
 estimate that shows where the memory is going.
 
+The GPU Reference section turns that estimate into a hardware starting point by
+matching it against known GPU VRAM sizes from the local `gpu.json` database. That
+hardware list is also a reference, not a guarantee.
+
 ## Count Formats
 
 Some input fields accept shorthand counts:
@@ -277,6 +281,23 @@ Additional trainable parameters for LoRA and QLoRA. Examples include trainable
 biases, newly added token embeddings, or a trainable classification head. For
 full finetuning, include custom extra parameters through `Trainable override`.
 
+### GPU Reference Controls
+
+**Hardware headroom %**
+
+Extra memory margin added before the calculator searches for GPUs. For example,
+if the estimate is `40 GiB` and headroom is `10%`, the GPU reference searches for
+cards with at least `44 GiB` of VRAM.
+
+This exists because the main estimate is not a guaranteed peak measurement. Real
+training can need extra memory for temporary buffers, fragmentation, kernels,
+drivers, framework choices, and dataloader behavior.
+
+**Vendor filter**
+
+Limits the GPU reference list to one vendor, such as NVIDIA or AMD, or shows all
+vendors in the local GPU database.
+
 ### LoRA Targets
 
 This section is visible for LoRA and QLoRA.
@@ -477,6 +498,32 @@ selected, and whether MoE storage rules are being applied.
 The sources list links to the papers and documentation behind the calculator.
 The detailed reference list is in [README.md](README.md).
 
+### GPU Reference Results
+
+**Estimate**
+
+The calculator's estimated total memory converted to GiB for comparison with GPU
+VRAM.
+
+**With headroom**
+
+The estimate after applying `Hardware headroom %`. This is the number used when
+deciding whether a GPU appears in the matching list.
+
+**GPU table**
+
+The table lists GPUs from `gpu.json` whose VRAM is at least the estimate plus
+headroom. It sorts by the smallest matching VRAM first, so the first rows are
+usually the closest practical hardware references.
+
+If no GPU in the selected vendor filter has enough VRAM, the table shows the
+largest entries instead and marks them as below the requirement.
+
+**GPU database credit**
+
+The GPU JSON database is credited to
+[voidful/gpu-info-api](https://github.com/voidful/gpu-info-api).
+
 ## Symbols From The README
 
 | Symbol | Meaning |
@@ -645,6 +692,12 @@ Running multiple microbatches before applying one optimizer update. It increases
 effective batch size without multiplying activation memory for a single
 microbatch.
 
+**GPU database**
+
+The local `gpu.json` file used by the GPU Reference section. It contains GPU
+names, vendors, VRAM sizes, memory bandwidth, launch information, and other
+hardware fields.
+
 **Grouped-query attention**
 
 An attention variant where multiple query heads share fewer key/value heads.
@@ -659,6 +712,11 @@ hidden size, attention heads, and vocabulary size.
 
 Information fetched from the Hugging Face model API, including safetensors
 parameter counts when available.
+
+**Hardware headroom**
+
+Extra VRAM margin added before selecting possible GPUs. It helps avoid treating a
+near-equal estimate as a safe fit.
 
 **Implementation-specific workspace**
 
@@ -865,6 +923,17 @@ normalization.
 **Vocabulary logits**
 
 The raw output scores for each vocabulary token before softmax.
+
+**VRAM**
+
+Video RAM or GPU memory. This is the memory on the GPU that stores model weights,
+gradients, optimizer states, activations, and temporary tensors during training.
+
+**VRAM-only reference**
+
+A hardware check based only on whether the GPU has enough listed memory. It does
+not verify speed, kernel support, driver support, framework compatibility,
+multi-GPU topology, or actual peak allocation in a real training script.
 
 **ZeRO**
 
