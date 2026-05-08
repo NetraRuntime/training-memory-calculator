@@ -65,6 +65,65 @@
     .full { grid-column: 1 / -1; }
     label { display: grid; gap: 5px; font-weight: 650; }
     label span { color: var(--muted); font-weight: 500; }
+    .label-heading, .label-with-help {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: var(--text);
+      font-weight: 650;
+    }
+    .label-with-help {
+      flex-wrap: wrap;
+    }
+    .help-icon, .tooltip-target {
+      position: relative;
+    }
+    .help-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+      color: var(--accent);
+      font-size: .72rem;
+      font-weight: 800;
+      line-height: 1;
+      cursor: help;
+      user-select: none;
+    }
+    .floating-tooltip {
+      position: fixed;
+      z-index: 1000;
+      max-width: min(340px, calc(100vw - 24px));
+      padding: 8px 10px;
+      border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+      border-radius: 7px;
+      background: light-dark(#171a1f, #f3f5f7);
+      color: light-dark(#ffffff, #111318);
+      box-shadow: 0 12px 30px #00000033;
+      font-size: .82rem;
+      font-weight: 550;
+      line-height: 1.35;
+      opacity: 0;
+      pointer-events: none;
+      text-align: left;
+      transform: translateY(4px);
+      transition: opacity .12s ease, transform .12s ease, visibility .12s ease;
+      visibility: hidden;
+    }
+    .floating-tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+      visibility: visible;
+    }
+    .help-icon:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     input, select, button {
       font: inherit;
       color: var(--text);
@@ -91,6 +150,9 @@
       background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
       color: var(--text);
       font-weight: 700;
+    }
+    button.tooltip-target {
+      overflow: visible;
     }
     button:focus-visible, input:focus-visible, select:focus-visible {
       outline: 2px solid var(--accent);
@@ -134,6 +196,7 @@
       min-height: 84px;
     }
     .metric .label { color: var(--muted); font-size: .82rem; }
+    .metric .label .label-with-help { color: var(--muted); font-weight: 750; }
     .metric .value { font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 800; margin-top: 6px; overflow-wrap: anywhere; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 9px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
@@ -375,6 +438,7 @@
     ];
     let currentMethod = 'full';
     let lastFetchNotes = [];
+    let floatingTooltip = null;
 
     const optimizerPresets = {
       adamw_bf16: {
@@ -428,6 +492,214 @@
         formula: '1 byte per parameter'
       }
     };
+
+    const inputHelp = {
+      modelRef: 'Hugging Face model id or URL. Press Fetch to fill parameter count and architecture fields when public metadata is available.',
+      totalParams: 'Total stored model parameters. Base model storage is calculated from this value, so embeddings and lm_head are assumed to already be included.',
+      layers: 'Number of Transformer blocks. This affects activation memory and LoRA target parameter counts.',
+      hiddenSize: 'Model width, often called h. Larger hidden size increases activations and most LoRA target shapes.',
+      attentionHeads: 'Number of query attention heads. Used with hidden size to compute each head dimension.',
+      kvHeads: 'Number of key/value heads. Lower than attention heads means grouped-query or multi-query attention, reducing k_proj and v_proj sizes.',
+      intermediateSize: 'Feed-forward width inside each Transformer block. This controls gate_proj, up_proj, and down_proj LoRA sizes.',
+      vocabSize: 'Number of tokens in the vocabulary. It affects lm_head LoRA and config-based estimates, but base memory mostly follows Total parameters.',
+      activeParams: 'Optional display-only active parameter count for MoE models. It does not reduce single-GPU storage memory.',
+      moeEnabled: 'Enable when feed-forward layers are mixture-of-experts. Expert LoRA targets are multiplied by expert count for storage.',
+      numExperts: 'Total experts per MoE layer. Single-GPU storage counts all experts, not only the active ones.',
+      topKExperts: 'Experts selected per token by the MoE router. Used for active-per-token display, not for reducing storage memory.',
+      sequenceLength: 'Tokens per training example. Longer sequences increase activation memory, especially with classic attention.',
+      microBatch: 'Examples processed by the GPU in one forward/backward pass. Gradient accumulation does not multiply this per-step activation memory.',
+      activationMode: 'Choose the activation-memory model: classic storage, selective recompute, full checkpoint estimate, or a manual measured value.',
+      kernelScale: 'Multiplier applied to formula-based activation memory to represent memory-efficient attention or fused kernels.',
+      customKernelScale: 'Custom activation multiplier. Example: 0.6 uses 60 percent of the formula estimate.',
+      manualActivationGb: 'Manual activation memory in decimal GB. Use this when you measured activations from a real training run.',
+      baseDtype: 'Bytes per base parameter for full finetuning and normal LoRA. QLoRA uses the quantized base storage selector instead.',
+      optimizerPreset: 'Controls trainable parameter, gradient, master-weight, and optimizer-state bytes per trainable parameter.',
+      overheadPercent: 'Extra percentage for framework buffers, allocator fragmentation, temporary tensors, and implementation details.',
+      quantPreset: 'QLoRA frozen base storage format. NF4 with double quantization is the usual QLoRA estimate.',
+      trainableOverride: 'Optional direct trainable-parameter count. For LoRA/QLoRA it replaces calculated adapter params before extra trainables are added.',
+      extraTrainableParams: 'Extra LoRA/QLoRA trainable parameters such as biases, new token embeddings, or a trainable head.',
+      loraRank: 'LoRA rank r. Adapter parameters scale linearly with rank: r * (d_in + d_out) for each target matrix.',
+      loraAlpha: 'LoRA scaling value. It affects adapter output scaling during training, not parameter count or memory in this calculator.'
+    };
+
+    const methodHelp = {
+      full: 'Train all selected model parameters. This allocates gradients and optimizer states for the whole trainable model.',
+      lora: 'Keep the base model frozen and train low-rank adapter matrices. Base weights still occupy memory.',
+      qlora: 'Store the frozen base model in quantized form and train LoRA adapters. This reduces base weight storage.'
+    };
+
+    const targetHelp = {
+      q: 'Query projection in attention. Usually hidden_size to hidden_size.',
+      k: 'Key projection in attention. Usually hidden_size to kv_dim.',
+      v: 'Value projection in attention. Usually hidden_size to kv_dim.',
+      o: 'Attention output projection. Usually hidden_size to hidden_size.',
+      gate: 'Feed-forward gate projection. Usually hidden_size to intermediate_size.',
+      up: 'Feed-forward up projection. Usually hidden_size to intermediate_size.',
+      down: 'Feed-forward down projection. Usually intermediate_size to hidden_size.',
+      lm_head: 'Final projection from hidden states to vocabulary logits. LoRA on lm_head scales with vocabulary size.'
+    };
+
+    const buttonHelp = {
+      fetchBtn: 'Fetch public Hugging Face metadata, then keep every fetched field editable.',
+      selectQv: 'Select q_proj and v_proj, a common small LoRA target set.',
+      selectAttention: 'Select q_proj, k_proj, v_proj, and o_proj.',
+      selectAllLinear: 'Select attention and feed-forward linear layers inside Transformer blocks.'
+    };
+
+    const metricHelp = {
+      'Estimated total': 'Final estimated single-GPU memory after model states, activations, and overhead are added.',
+      'Trainable params': 'Parameters that receive gradients and optimizer states.',
+      'Base storage': 'Memory used by frozen or trainable base model weights before gradients and optimizer states.',
+      'Activations': 'Estimated forward-pass tensors saved for backward computation.',
+      'LoRA params': 'Calculated adapter parameter count from selected targets, rank, layers, and architecture.',
+      'Active params display': 'Active parameter count shown for compute intuition, especially MoE. It does not reduce storage memory.',
+      'LoRA active/token': 'MoE-aware estimate of adapter parameters active for one token. Storage still uses total adapter params.',
+      'Method': 'Currently selected training method.'
+    };
+
+    const breakdownHelp = {
+      'Model weights': 'Base model weights for full finetuning, stored at the selected base/model dtype.',
+      'Frozen base weights': 'Base model weights for LoRA. They are not trained, but they still occupy GPU memory.',
+      'Quantized frozen base weights': 'Frozen QLoRA base weights stored with the selected quantized format.',
+      'Additional trainable weights': 'Extra trainable weight storage outside the model-weight row. Usually zero for full finetuning here.',
+      'LoRA adapter weights': 'Trainable low-rank adapter weights for LoRA.',
+      'QLoRA adapter weights': 'Trainable LoRA adapter weights used with a quantized frozen base model.',
+      'Gradients': 'Gradient buffers for trainable parameters only.',
+      'FP32 master weights': 'Optional fp32 trainable-weight copy used by some mixed-precision AdamW setups.',
+      'Optimizer states': 'Optimizer memory for trainable parameters, such as AdamW first and second moments.',
+      'Activations': 'Activation memory estimate or manual activation override.',
+      'Framework overhead': 'Extra memory for framework buffers, temporary tensors, allocator effects, and implementation details.',
+      'Estimated total': 'Sum of all memory rows.'
+    };
+
+    function createHelpIcon(text) {
+      const icon = document.createElement('span');
+      icon.className = 'help-icon';
+      icon.tabIndex = 0;
+      icon.setAttribute('role', 'button');
+      icon.setAttribute('aria-label', text);
+      icon.dataset.tooltip = text;
+      icon.textContent = '?';
+      icon.addEventListener('mousedown', (event) => event.preventDefault());
+      icon.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        icon.focus();
+      });
+      return icon;
+    }
+
+    function helpIconMarkup(text) {
+      if (!text) return '';
+      return '<span class="help-icon" tabindex="0" role="button" aria-label="' + escapeHtml(text) + '" data-tooltip="' + escapeHtml(text) + '">?</span>';
+    }
+
+    function withHelpText(label, text) {
+      if (!text) return escapeHtml(label);
+      return '<span class="label-with-help">' + escapeHtml(label) + helpIconMarkup(text) + '</span>';
+    }
+
+    function addTooltipTarget(node, text) {
+      if (!node || !text) return;
+      node.classList.add('tooltip-target');
+      node.dataset.tooltip = text;
+      const label = node.textContent.trim() || node.getAttribute('aria-label') || 'Control';
+      node.setAttribute('aria-label', label + ': ' + text);
+    }
+
+    function attachInlineHelp(label, text) {
+      if (!label || !text || label.querySelector('.help-icon')) return;
+      label.appendChild(createHelpIcon(text));
+    }
+
+    function enhanceFieldLabel(label, text) {
+      if (!label || !text || label.querySelector('.label-heading')) return;
+      const control = label.querySelector('input, select, textarea');
+      if (!control) return;
+      const heading = document.createElement('span');
+      heading.className = 'label-heading';
+      while (label.firstChild && label.firstChild !== control) {
+        const node = label.firstChild;
+        if (node.nodeType === Node.TEXT_NODE) {
+          const textContent = node.textContent.replace(/\s+/g, ' ').trim();
+          label.removeChild(node);
+          if (textContent) heading.appendChild(document.createTextNode(textContent));
+        } else {
+          heading.appendChild(node);
+        }
+      }
+      heading.appendChild(createHelpIcon(text));
+      label.insertBefore(heading, control);
+    }
+
+    function applyStaticHelp() {
+      document.querySelectorAll('label[for]').forEach((label) => {
+        enhanceFieldLabel(label, inputHelp[label.getAttribute('for')]);
+      });
+      attachInlineHelp($('moeEnabled')?.closest('label'), inputHelp.moeEnabled);
+      document.querySelectorAll('#targetChecks input').forEach((input) => {
+        attachInlineHelp(input.closest('label'), targetHelp[input.value]);
+      });
+      document.querySelectorAll('.segmented button[data-method]').forEach((button) => {
+        addTooltipTarget(button, methodHelp[button.dataset.method]);
+      });
+      Object.entries(buttonHelp).forEach(([id, text]) => addTooltipTarget($(id), text));
+    }
+
+    function setupFloatingTooltip() {
+      floatingTooltip = document.createElement('div');
+      floatingTooltip.className = 'floating-tooltip';
+      floatingTooltip.setAttribute('role', 'tooltip');
+      document.body.appendChild(floatingTooltip);
+
+      document.addEventListener('mouseover', (event) => {
+        const target = tooltipTargetFromEvent(event);
+        if (target) showFloatingTooltip(target);
+      });
+      document.addEventListener('focusin', (event) => {
+        const target = tooltipTargetFromEvent(event);
+        if (target) showFloatingTooltip(target);
+      });
+      document.addEventListener('mouseout', (event) => {
+        const target = tooltipTargetFromEvent(event);
+        if (!target) return;
+        if (event.relatedTarget instanceof Node && target.contains(event.relatedTarget)) return;
+        hideFloatingTooltip();
+      });
+      document.addEventListener('focusout', (event) => {
+        if (tooltipTargetFromEvent(event)) hideFloatingTooltip();
+      });
+      window.addEventListener('resize', hideFloatingTooltip);
+      window.addEventListener('scroll', hideFloatingTooltip, true);
+    }
+
+    function tooltipTargetFromEvent(event) {
+      return event.target instanceof Element ? event.target.closest('[data-tooltip]') : null;
+    }
+
+    function showFloatingTooltip(target) {
+      if (!floatingTooltip || !target.dataset.tooltip) return;
+      floatingTooltip.textContent = target.dataset.tooltip;
+      floatingTooltip.classList.add('visible');
+      floatingTooltip.style.left = '0px';
+      floatingTooltip.style.top = '0px';
+
+      const margin = 10;
+      const rect = target.getBoundingClientRect();
+      const tooltipRect = floatingTooltip.getBoundingClientRect();
+      let left = rect.left + rect.width / 2 - tooltipRect.width / 2;
+      left = Math.max(margin, Math.min(left, window.innerWidth - tooltipRect.width - margin));
+      let top = rect.top - tooltipRect.height - 8;
+      if (top < margin) top = rect.bottom + 8;
+      top = Math.max(margin, Math.min(top, window.innerHeight - tooltipRect.height - margin));
+
+      floatingTooltip.style.left = left + 'px';
+      floatingTooltip.style.top = top + 'px';
+    }
+
+    function hideFloatingTooltip() {
+      if (floatingTooltip) floatingTooltip.classList.remove('visible');
+    }
 
     function toNumber(id, fallback = 0) {
       const value = Number($(id).value);
@@ -639,13 +911,13 @@
         ['LoRA active/token', formatCount(data.lora.activePerToken)],
         ['Method', currentMethod.toUpperCase()]
       ];
-      $('metrics').innerHTML = metrics.map(([label, value]) => '<div class="metric"><div class="label">' + escapeHtml(label) + '</div><div class="value">' + escapeHtml(value) + '</div></div>').join('');
+      $('metrics').innerHTML = metrics.map(([label, value]) => '<div class="metric"><div class="label">' + withHelpText(label, metricHelp[label]) + '</div><div class="value">' + escapeHtml(value) + '</div></div>').join('');
     }
 
     function renderBreakdown(rows) {
       $('breakdown').innerHTML = rows.map(([name, bytes, formula], index) => {
         const strong = index === rows.length - 1 ? ' style="font-weight:800"' : '';
-        return '<tr' + strong + '><td>' + escapeHtml(name) + '</td><td class="num">' + escapeHtml(formatBytesDetailed(bytes)) + '</td><td class="mono">' + escapeHtml(formula) + '</td></tr>';
+        return '<tr' + strong + '><td>' + withHelpText(name, breakdownHelp[name]) + '</td><td class="num">' + escapeHtml(formatBytesDetailed(bytes)) + '</td><td class="mono">' + escapeHtml(formula) + '</td></tr>';
       }).join('');
     }
 
@@ -831,6 +1103,8 @@
     $('selectAttention').addEventListener('click', () => setTargets(['q', 'k', 'v', 'o']));
     $('selectAllLinear').addEventListener('click', () => setTargets(['q', 'k', 'v', 'o', 'gate', 'up', 'down']));
 
+    applyStaticHelp();
+    setupFloatingTooltip();
     calculate();
   </script>
 </body>
