@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLM Finetuning Memory Calculator</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f7f8fa, #111318);
+      --panel: light-dark(#ffffff, #181b22);
+      --panel-2: light-dark(#f1f3f6, #20242d);
+      --text: light-dark(#171a1f, #f3f5f7);
+      --muted: light-dark(#5b6472, #a9b0bc);
+      --border: light-dark(#d5dae1, #343945);
+      --accent: light-dark(#0b6bcb, #77b7ff);
+      --accent-2: light-dark(#0d7f63, #5fd0a8);
+      --warn: light-dark(#a05a00, #f3bd61);
+      --bad: light-dark(#b3261e, #ff8c82);
+      --shadow: light-dark(0 12px 32px #1f29371a, none);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    header {
+      padding: 24px clamp(16px, 3vw, 36px) 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    h1, h2, h3 { margin: 0; line-height: 1.2; letter-spacing: 0; }
+    h1 { font-size: clamp(1.35rem, 2.4vw, 2rem); }
+    h2 { font-size: 1rem; margin-bottom: 12px; }
+    h3 { font-size: .9rem; margin: 18px 0 8px; color: var(--muted); }
+    p { margin: 8px 0; }
+    main {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 18px clamp(12px, 2.4vw, 28px) 32px;
+    }
+    .subtitle { color: var(--muted); max-width: 980px; margin-top: 8px; }
+    .app-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .stack { display: grid; gap: 16px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+    .input-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .input-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .full { grid-column: 1 / -1; }
+    label { display: grid; gap: 5px; font-weight: 650; }
+    label span { color: var(--muted); font-weight: 500; }
+    input, select, button {
+      font: inherit;
+      color: var(--text);
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      border-radius: 7px;
+      padding: 9px 10px;
+      min-height: 38px;
+    }
+    input[type="checkbox"], input[type="radio"] { width: auto; min-height: auto; }
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      border-radius: 7px;
+      padding: 9px 12px;
+      min-height: 38px;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+      background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+      color: var(--text);
+      font-weight: 700;
+    }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+    .grow { flex: 1 1 220px; }
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .segmented button[aria-pressed="true"] {
+      border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+      background: color-mix(in srgb, var(--accent) 20%, var(--panel-2));
+      color: var(--accent);
+      font-weight: 750;
+    }
+    .check-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 10px;
+    }
+    .check-grid label, .inline-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-2);
+      min-height: 84px;
+    }
+    .metric .label { color: var(--muted); font-size: .82rem; }
+    .metric .value { font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 800; margin-top: 6px; overflow-wrap: anywhere; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: .82rem; font-weight: 750; }
+    td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .note-list { margin: 0; padding-left: 18px; color: var(--muted); }
+    .note-list li { margin: 5px 0; }
+    .status { margin-top: 8px; color: var(--muted); min-height: 20px; }
+    .ok { color: var(--accent-2); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace; }
+    .source-grid { display: grid; gap: 7px; }
+    .source-grid a { color: var(--accent); overflow-wrap: anywhere; }
+    .hidden { display: none !important; }
+    @media (max-width: 1020px) {
+      .app-grid { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+      header { padding-top: 18px; }
+      .input-grid, .input-grid.three, .metric-grid { grid-template-columns: 1fr; }
+      .segmented { grid-template-columns: 1fr; }
+      th:nth-child(3), td:nth-child(3) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LLM Finetuning Memory Calculator</h1>
+    <p class="subtitle">Single-GPU memory estimates for full finetuning, LoRA, and QLoRA. Model-state accounting is direct from parameter counts; activation memory is a cited Transformer approximation with visible assumptions.</p>
+  </header>
+
+  <main>
+    <div class="app-grid">
+      <div class="stack">
+        <section class="panel">
+          <h2>Model Metadata</h2>
+          <div class="row">
+            <label class="grow" for="modelRef">Hugging Face repo or URL
+              <input id="modelRef" type="text" value="mistralai/Mistral-7B-v0.1" autocomplete="off" />
+            </label>
+            <button id="fetchBtn" class="primary" type="button">Fetch</button>
+          </div>
+          <div id="fetchStatus" class="status">Manual fields are always editable.</div>
+        </section>
+
+        <section class="panel">
+          <h2>Training Method</h2>
+          <div class="segmented" role="group" aria-label="Training method">
+            <button type="button" data-method="full" aria-pressed="true">Full</button>
+            <button type="button" data-method="lora" aria-pressed="false">LoRA</button>
+            <button type="button" data-method="qlora" aria-pressed="false">QLoRA</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Architecture</h2>
+          <div class="input-grid">
+            <label for="totalParams">Total parameters
+              <input id="totalParams" type="text" value="7B" inputmode="decimal" />
+            </label>
+            <label for="layers">Layers
+              <input id="layers" type="number" min="1" step="1" value="32" />
+            </label>
+            <label for="hiddenSize">Hidden size
+              <input id="hiddenSize" type="number" min="1" step="1" value="4096" />
+            </label>
+            <label for="attentionHeads">Attention heads
+              <input id="attentionHeads" type="number" min="1" step="1" value="32" />
+            </label>
+            <label for="kvHeads">KV heads
+              <input id="kvHeads" type="number" min="1" step="1" value="8" />
+            </label>
+            <label for="intermediateSize">Intermediate size
+              <input id="intermediateSize" type="number" min="1" step="1" value="14336" />
+            </label>
+            <label for="vocabSize">Vocabulary size
+              <input id="vocabSize" type="number" min="1" step="1" value="32000" />
+            </label>
+            <label for="activeParams">Active params override <span>optional MoE display</span>
+              <input id="activeParams" type="text" placeholder="13B" inputmode="decimal" />
+            </label>
+          </div>
+          <h3>Mixture Of Experts</h3>
+          <label class="inline-check"><input id="moeEnabled" type="checkbox" /> Model has MoE feed-forward layers</label>
+          <div class="input-grid" id="moeFields">
+            <label for="numExperts">Experts per layer
+              <input id="numExperts" type="number" min="1" step="1" value="8" />
+            </label>
+            <label for="topKExperts">Active experts per token
+              <input id="topKExperts" type="number" min="1" step="1" value="2" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Batch And Activations</h2>
+          <div class="input-grid">
+            <label for="sequenceLength">Sequence length
+              <input id="sequenceLength" type="number" min="1" step="1" value="2048" />
+            </label>
+            <label for="microBatch">Microbatch size
+              <input id="microBatch" type="number" min="1" step="1" value="1" />
+            </label>
+            <label for="activationMode">Activation mode
+              <select id="activationMode">
+                <option value="classic">Classic no recompute</option>
+                <option value="selective">Selective recompute</option>
+                <option value="full">Full checkpointing estimate</option>
+                <option value="manual">Manual override</option>
+              </select>
+            </label>
+            <label for="kernelScale">Kernel multiplier
+              <select id="kernelScale">
+                <option value="1">1.00 classic baseline</option>
+                <option value="0.75">0.75 memory-efficient attention</option>
+                <option value="0.50">0.50 aggressive fused kernels</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label id="customKernelWrap" class="hidden" for="customKernelScale">Custom multiplier
+              <input id="customKernelScale" type="number" min="0" step="0.01" value="1" />
+            </label>
+            <label id="manualActivationWrap" class="hidden" for="manualActivationGb">Manual activations GB
+              <input id="manualActivationGb" type="number" min="0" step="0.1" value="0" />
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="panel">
+          <h2>Precision And Optimizer</h2>
+          <div class="input-grid three">
+            <label for="baseDtype">Base/model dtype
+              <select id="baseDtype">
+                <option value="2" selected>BF16/FP16 (2 bytes)</option>
+                <option value="4">FP32 (4 bytes)</option>
+              </select>
+            </label>
+            <label for="optimizerPreset">Optimizer preset
+              <select id="optimizerPreset">
+                <option value="adamw_bf16" selected>BF16 AdamW, no fp32 master</option>
+                <option value="adamw_fp16_master">FP16 mixed AdamW + fp32 master</option>
+                <option value="adamw_8bit">8-bit AdamW moments</option>
+                <option value="paged_adamw">Paged AdamW states</option>
+              </select>
+            </label>
+            <label for="overheadPercent">Framework overhead %
+              <input id="overheadPercent" type="number" min="0" step="1" value="10" />
+            </label>
+            <label id="quantWrap" for="quantPreset">QLoRA base storage
+              <select id="quantPreset">
+                <option value="nf4_dq" selected>NF4 + double quantization</option>
+                <option value="nf4">NF4 without double quantization</option>
+                <option value="int8">8-bit base storage</option>
+              </select>
+            </label>
+            <label for="trainableOverride">Trainable override <span>optional</span>
+              <input id="trainableOverride" type="text" placeholder="Leave blank" inputmode="decimal" />
+            </label>
+            <label for="extraTrainableParams">Extra trainable params <span>biases, tokens, heads</span>
+              <input id="extraTrainableParams" type="text" value="0" inputmode="decimal" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" id="loraPanel">
+          <h2>LoRA Targets</h2>
+          <div class="input-grid">
+            <label for="loraRank">LoRA rank
+              <input id="loraRank" type="number" min="1" step="1" value="16" />
+            </label>
+            <label for="loraAlpha">LoRA alpha <span>display only</span>
+              <input id="loraAlpha" type="number" min="1" step="1" value="32" />
+            </label>
+          </div>
+          <h3>Target Modules</h3>
+          <div class="check-grid" id="targetChecks">
+            <label><input type="checkbox" value="q" checked /> q_proj</label>
+            <label><input type="checkbox" value="k" /> k_proj</label>
+            <label><input type="checkbox" value="v" checked /> v_proj</label>
+            <label><input type="checkbox" value="o" /> o_proj</label>
+            <label><input type="checkbox" value="gate" /> gate_proj</label>
+            <label><input type="checkbox" value="up" /> up_proj</label>
+            <label><input type="checkbox" value="down" /> down_proj</label>
+            <label><input type="checkbox" value="lm_head" /> lm_head</label>
+          </div>
+          <div class="row" style="margin-top: 12px">
+            <button type="button" id="selectQv">Q/V</button>
+            <button type="button" id="selectAttention">Attention</button>
+            <button type="button" id="selectAllLinear">All linear</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Estimate</h2>
+          <div class="metric-grid" id="metrics"></div>
+          <h3>Breakdown</h3>
+          <div style="overflow:auto">
+            <table>
+              <thead>
+                <tr><th>Component</th><th class="num">Memory</th><th>Formula</th></tr>
+              </thead>
+              <tbody id="breakdown"></tbody>
+            </table>
+          </div>
+          <h3>Assumptions</h3>
+          <ul class="note-list" id="assumptions"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Sources</h2>
+          <div class="source-grid">
+            <a href="https://arxiv.org/abs/1910.02054" target="_blank" rel="noreferrer">ZeRO model-state accounting</a>
+            <a href="https://arxiv.org/abs/2106.09685" target="_blank" rel="noreferrer">LoRA low-rank adaptation</a>
+            <a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noreferrer">QLoRA NF4, double quantization, paged optimizers</a>
+            <a href="https://arxiv.org/abs/2205.05198" target="_blank" rel="noreferrer">Transformer activation memory formulas</a>
+            <a href="https://arxiv.org/abs/2401.04088" target="_blank" rel="noreferrer">Mixtral active vs sparse parameter distinction</a>
+            <a href="https://huggingface.co/docs/peft/developer_guides/quantization" target="_blank" rel="noreferrer">Hugging Face PEFT quantization</a>
+            <a href="https://huggingface.co/docs/bitsandbytes/explanations/optimizers" target="_blank" rel="noreferrer">bitsandbytes optimizer behavior</a>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const controls = [
+      'modelRef', 'totalParams', 'layers', 'hiddenSize', 'attentionHeads', 'kvHeads',
+      'intermediateSize', 'vocabSize', 'activeParams', 'moeEnabled', 'numExperts',
+      'topKExperts', 'sequenceLength', 'microBatch', 'activationMode', 'kernelScale',
+      'customKernelScale', 'manualActivationGb', 'baseDtype', 'optimizerPreset',
+      'overheadPercent', 'quantPreset', 'trainableOverride', 'extraTrainableParams',
+      'loraRank', 'loraAlpha'
+    ];
+    let currentMethod = 'full';
+    let lastFetchNotes = [];
+
+    const optimizerPresets = {
+      adamw_bf16: {
+        label: 'BF16/FP16 AdamW, no fp32 master',
+        paramBytes: 2,
+        gradBytes: 2,
+        masterBytes: 0,
+        optBytes: 8,
+        note: 'Practical BF16-style preset: parameter + gradient + two fp32 Adam moments = 12 bytes per trainable parameter.'
+      },
+      adamw_fp16_master: {
+        label: 'FP16 mixed AdamW + fp32 master',
+        paramBytes: 2,
+        gradBytes: 2,
+        masterBytes: 4,
+        optBytes: 8,
+        note: 'ZeRO accounting: fp16 params, fp16 grads, fp32 master params, and two fp32 Adam moments = 16 bytes per trainable parameter.'
+      },
+      adamw_8bit: {
+        label: '8-bit AdamW moments',
+        paramBytes: 2,
+        gradBytes: 2,
+        masterBytes: 0,
+        optBytes: 2.125,
+        note: 'Approximation: two 8-bit moment tensors plus small blockwise quantization metadata. Exact metadata depends on implementation.'
+      },
+      paged_adamw: {
+        label: 'Paged AdamW states',
+        paramBytes: 2,
+        gradBytes: 2,
+        masterBytes: 0,
+        optBytes: 8,
+        note: 'Paged optimizers allocate the same logical states but may evict pages to CPU under pressure; this estimate does not subtract nondeterministic paging.'
+      }
+    };
+
+    const quantPresets = {
+      nf4_dq: {
+        label: 'NF4 + double quantization',
+        bytes: (4 + 8 / 64 + 32 / (64 * 256)) / 8,
+        formula: '(4 + 8/64 + 32/(64*256)) / 8 bytes per parameter'
+      },
+      nf4: {
+        label: 'NF4 without double quantization',
+        bytes: (4 + 32 / 64) / 8,
+        formula: '(4 + 32/64) / 8 bytes per parameter'
+      },
+      int8: {
+        label: '8-bit base storage',
+        bytes: 1,
+        formula: '1 byte per parameter'
+      }
+    };
+
+    function toNumber(id, fallback = 0) {
+      const value = Number($(id).value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function parseCount(value) {
+      if (typeof value !== 'string') return Number(value) || 0;
+      const raw = value.trim().replace(/,/g, '').replace(/_/g, '').toLowerCase();
+      if (!raw) return 0;
+      const match = raw.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*([kmbt])?$/);
+      if (!match) {
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? numeric : 0;
+      }
+      const amount = Number(match[1]);
+      const suffix = match[2] || '';
+      const scale = suffix === 'k' ? 1e3 : suffix === 'm' ? 1e6 : suffix === 'b' ? 1e9 : suffix === 't' ? 1e12 : 1;
+      return amount * scale;
+    }
+
+    function formatCount(value) {
+      const n = Number(value) || 0;
+      if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+      return Math.round(n).toString();
+    }
+
+    function formatBytes(bytes) {
+      const n = Number(bytes) || 0;
+      const sign = n < 0 ? '-' : '';
+      const abs = Math.abs(n);
+      if (abs >= 1e12) return sign + (abs / 1e12).toFixed(2) + ' TB';
+      if (abs >= 1e9) return sign + (abs / 1e9).toFixed(2) + ' GB';
+      if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2) + ' MB';
+      if (abs >= 1e3) return sign + (abs / 1e3).toFixed(2) + ' KB';
+      return sign + abs.toFixed(0) + ' B';
+    }
+
+    function formatBytesDetailed(bytes) {
+      const gib = (Number(bytes) || 0) / (1024 ** 3);
+      return formatBytes(bytes) + ' (' + gib.toFixed(2) + ' GiB)';
+    }
+
+    function selectedTargets() {
+      return Array.from(document.querySelectorAll('#targetChecks input:checked')).map((node) => node.value);
+    }
+
+    function setTargets(values) {
+      document.querySelectorAll('#targetChecks input').forEach((node) => {
+        node.checked = values.includes(node.value);
+      });
+      calculate();
+    }
+
+    function getArchitecture() {
+      const h = Math.max(1, toNumber('hiddenSize', 1));
+      const a = Math.max(1, toNumber('attentionHeads', 1));
+      const kvHeads = Math.max(1, toNumber('kvHeads', a));
+      const headDim = h / a;
+      return {
+        totalParams: parseCount($('totalParams').value),
+        activeParams: parseCount($('activeParams').value),
+        layers: Math.max(1, toNumber('layers', 1)),
+        hiddenSize: h,
+        attentionHeads: a,
+        kvHeads,
+        kvDim: Math.max(1, kvHeads * headDim),
+        intermediateSize: Math.max(1, toNumber('intermediateSize', h * 4)),
+        vocabSize: Math.max(1, toNumber('vocabSize', 32000)),
+        sequenceLength: Math.max(1, toNumber('sequenceLength', 1)),
+        microBatch: Math.max(1, toNumber('microBatch', 1)),
+        moeEnabled: $('moeEnabled').checked,
+        numExperts: Math.max(1, toNumber('numExperts', 1)),
+        topKExperts: Math.max(1, toNumber('topKExperts', 1))
+      };
+    }
+
+    function loraParamsForTarget(target, arch, rank, activeOnly = false) {
+      const h = arch.hiddenSize;
+      const i = arch.intermediateSize;
+      const expertMultiplier = arch.moeEnabled ? (activeOnly ? Math.min(arch.topKExperts, arch.numExperts) : arch.numExperts) : 1;
+      switch (target) {
+        case 'q': return rank * (h + h);
+        case 'k': return rank * (h + arch.kvDim);
+        case 'v': return rank * (h + arch.kvDim);
+        case 'o': return rank * (h + h);
+        case 'gate': return expertMultiplier * rank * (h + i);
+        case 'up': return expertMultiplier * rank * (h + i);
+        case 'down': return expertMultiplier * rank * (i + h);
+        case 'lm_head': return rank * (h + arch.vocabSize);
+        default: return 0;
+      }
+    }
+
+    function calculateLoraParams(arch) {
+      const rank = Math.max(1, toNumber('loraRank', 1));
+      const targets = selectedTargets();
+      let perLayerTotal = 0;
+      let perLayerActive = 0;
+      let outsideLayer = 0;
+      for (const target of targets) {
+        if (target === 'lm_head') {
+          outsideLayer += loraParamsForTarget(target, arch, rank, false);
+        } else {
+          perLayerTotal += loraParamsForTarget(target, arch, rank, false);
+          perLayerActive += loraParamsForTarget(target, arch, rank, true);
+        }
+      }
+      return {
+        rank,
+        targets,
+        total: perLayerTotal * arch.layers + outsideLayer,
+        activePerToken: perLayerActive * arch.layers + outsideLayer,
+        perLayerTotal,
+        outsideLayer
+      };
+    }
+
+    function activationBytes(arch) {
+      const mode = $('activationMode').value;
+      if (mode === 'manual') return Math.max(0, toNumber('manualActivationGb', 0)) * 1e9;
+      const s = arch.sequenceLength;
+      const b = arch.microBatch;
+      const h = arch.hiddenSize;
+      const a = arch.attentionHeads;
+      const l = arch.layers;
+      let bytes = 0;
+      if (mode === 'classic') bytes = l * s * b * h * (34 + (5 * a * s / h));
+      if (mode === 'selective') bytes = 34 * s * b * h * l;
+      if (mode === 'full') bytes = 2 * s * b * h * l;
+      const scale = $('kernelScale').value === 'custom' ? Math.max(0, toNumber('customKernelScale', 1)) : Number($('kernelScale').value);
+      return bytes * (Number.isFinite(scale) ? scale : 1);
+    }
+
+    function calculate() {
+      const arch = getArchitecture();
+      const optimizer = optimizerPresets[$('optimizerPreset').value] || optimizerPresets.adamw_bf16;
+      const baseDtypeBytes = Number($('baseDtype').value) || 2;
+      const extraTrainable = parseCount($('extraTrainableParams').value);
+      const trainableOverride = parseCount($('trainableOverride').value);
+      const lora = calculateLoraParams(arch);
+      const quant = quantPresets[$('quantPreset').value] || quantPresets.nf4_dq;
+
+      let trainableParams = arch.totalParams;
+      let baseWeightBytes = arch.totalParams * baseDtypeBytes;
+      let trainableWeightBytes = 0;
+      let baseLabel = 'Model weights';
+      let trainableLabel = 'Trainable weight copy';
+      let trainableFormula = 'Included in model weights';
+
+      if (currentMethod === 'full') {
+        trainableParams = trainableOverride || arch.totalParams;
+        trainableWeightBytes = 0;
+        trainableLabel = 'Additional trainable weights';
+      } else {
+        const adapterParams = (trainableOverride || lora.total) + extraTrainable;
+        trainableParams = adapterParams;
+        trainableWeightBytes = adapterParams * optimizer.paramBytes;
+        baseLabel = currentMethod === 'qlora' ? 'Quantized frozen base weights' : 'Frozen base weights';
+        trainableLabel = currentMethod === 'qlora' ? 'QLoRA adapter weights' : 'LoRA adapter weights';
+        trainableFormula = formatCount(adapterParams) + ' * ' + optimizer.paramBytes + ' bytes';
+        if (currentMethod === 'qlora') baseWeightBytes = arch.totalParams * quant.bytes;
+      }
+
+      const gradientBytes = trainableParams * optimizer.gradBytes;
+      const masterBytes = trainableParams * optimizer.masterBytes;
+      const optimizerBytes = trainableParams * optimizer.optBytes;
+      const activation = activationBytes(arch);
+      const subtotal = baseWeightBytes + trainableWeightBytes + gradientBytes + masterBytes + optimizerBytes + activation;
+      const overhead = subtotal * Math.max(0, toNumber('overheadPercent', 0)) / 100;
+      const total = subtotal + overhead;
+
+      renderMetrics({ total, trainableParams, baseWeightBytes, activation, lora, arch });
+      renderBreakdown([
+        [baseLabel, baseWeightBytes, currentMethod === 'qlora' ? formatCount(arch.totalParams) + ' * ' + quant.formula : formatCount(arch.totalParams) + ' * ' + baseDtypeBytes + ' bytes'],
+        [trainableLabel, trainableWeightBytes, trainableFormula],
+        ['Gradients', gradientBytes, formatCount(trainableParams) + ' * ' + optimizer.gradBytes + ' bytes'],
+        ['FP32 master weights', masterBytes, formatCount(trainableParams) + ' * ' + optimizer.masterBytes + ' bytes'],
+        ['Optimizer states', optimizerBytes, formatCount(trainableParams) + ' * ' + optimizer.optBytes + ' bytes'],
+        ['Activations', activation, activationFormulaLabel(arch)],
+        ['Framework overhead', overhead, $('overheadPercent').value + '% of subtotal'],
+        ['Estimated total', total, 'Sum of all rows above']
+      ]);
+      renderAssumptions({ arch, optimizer, quant, lora, trainableParams });
+      updateVisibility();
+    }
+
+    function activationFormulaLabel(arch) {
+      const mode = $('activationMode').value;
+      if (mode === 'manual') return 'Manual override';
+      const scale = $('kernelScale').value === 'custom' ? $('customKernelScale').value : $('kernelScale').value;
+      if (mode === 'classic') return 'L*s*b*h*(34 + 5*a*s/h) * ' + scale;
+      if (mode === 'selective') return '34*s*b*h*L * ' + scale;
+      return '2*s*b*h*L * ' + scale;
+    }
+
+    function renderMetrics(data) {
+      const active = data.arch.activeParams || (data.arch.moeEnabled ? data.arch.totalParams * Math.min(data.arch.topKExperts, data.arch.numExperts) / data.arch.numExperts : data.arch.totalParams);
+      const metrics = [
+        ['Estimated total', formatBytesDetailed(data.total)],
+        ['Trainable params', formatCount(data.trainableParams)],
+        ['Base storage', formatBytesDetailed(data.baseWeightBytes)],
+        ['Activations', formatBytesDetailed(data.activation)],
+        ['LoRA params', formatCount(data.lora.total)],
+        ['Active params display', formatCount(active)],
+        ['LoRA active/token', formatCount(data.lora.activePerToken)],
+        ['Method', currentMethod.toUpperCase()]
+      ];
+      $('metrics').innerHTML = metrics.map(([label, value]) => '<div class="metric"><div class="label">' + escapeHtml(label) + '</div><div class="value">' + escapeHtml(value) + '</div></div>').join('');
+    }
+
+    function renderBreakdown(rows) {
+      $('breakdown').innerHTML = rows.map(([name, bytes, formula], index) => {
+        const strong = index === rows.length - 1 ? ' style="font-weight:800"' : '';
+        return '<tr' + strong + '><td>' + escapeHtml(name) + '</td><td class="num">' + escapeHtml(formatBytesDetailed(bytes)) + '</td><td class="mono">' + escapeHtml(formula) + '</td></tr>';
+      }).join('');
+    }
+
+    function renderAssumptions({ arch, optimizer, quant, lora, trainableParams }) {
+      const notes = [];
+      notes.push('Single-GPU estimate. No ZeRO, FSDP, tensor parallelism, pipeline parallelism, expert parallelism, or CPU offload partitioning is applied.');
+      notes.push(optimizer.note);
+      notes.push('Activation memory uses the cited Transformer formula from Korthikanti et al.; exact kernels can differ.');
+      if (currentMethod === 'qlora') notes.push('QLoRA base storage uses ' + quant.label + ': ' + quant.formula + '.');
+      if (currentMethod !== 'full') notes.push('LoRA target modules: ' + (lora.targets.join(', ') || 'none') + '; optimizer states apply to ' + formatCount(trainableParams) + ' trainable parameters.');
+      if (arch.moeEnabled) notes.push('MoE storage uses total/sparse parameters. Active parameters are shown for context and do not reduce single-GPU resident weight storage.');
+      if (lastFetchNotes.length) notes.push(...lastFetchNotes);
+      $('assumptions').innerHTML = notes.map((note) => '<li>' + escapeHtml(note) + '</li>').join('');
+    }
+
+    function updateVisibility() {
+      $('loraPanel').classList.toggle('hidden', currentMethod === 'full');
+      $('quantWrap').classList.toggle('hidden', currentMethod !== 'qlora');
+      $('manualActivationWrap').classList.toggle('hidden', $('activationMode').value !== 'manual');
+      $('customKernelWrap').classList.toggle('hidden', $('kernelScale').value !== 'custom');
+      $('moeFields').classList.toggle('hidden', !$('moeEnabled').checked);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function normalizeRepoId(input) {
+      const value = input.trim();
+      if (!value) return '';
+      try {
+        const url = new URL(value);
+        if (!url.hostname.includes('huggingface.co')) return value;
+        const parts = url.pathname.split('/').filter(Boolean);
+        if (parts.length >= 2) return parts[0] + '/' + parts[1];
+      } catch {
+        // Not a URL, treat as repo id.
+      }
+      return value.replace(/^hf:\/\//, '').replace(/^\/+|\/+$/g, '');
+    }
+
+    function encodeRepoPath(repo) {
+      return repo.split('/').map(encodeURIComponent).join('/');
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+
+    async function fetchMetadata() {
+      const repo = normalizeRepoId($('modelRef').value);
+      if (!repo || !repo.includes('/')) {
+        $('fetchStatus').innerHTML = '<span class="bad">Enter a Hugging Face repo id like owner/model.</span>';
+        return;
+      }
+      $('fetchStatus').textContent = 'Fetching metadata...';
+      lastFetchNotes = [];
+      const repoPath = encodeRepoPath(repo);
+      const apiUrl = 'https://huggingface.co/api/models/' + repoPath;
+      const configUrl = 'https://huggingface.co/' + repoPath + '/resolve/main/config.json';
+      const [apiResult, configResult] = await Promise.allSettled([fetchJson(apiUrl), fetchJson(configUrl)]);
+      let found = [];
+      let warnings = [];
+
+      if (apiResult.status === 'fulfilled') {
+        const params = extractParameterCount(apiResult.value);
+        if (params > 0) {
+          $('totalParams').value = formatCount(params);
+          found.push('total parameters');
+        } else {
+          warnings.push('API did not include exact safetensors parameter count.');
+        }
+      } else {
+        warnings.push('Model API fetch failed: ' + apiResult.reason.message + '.');
+      }
+
+      if (configResult.status === 'fulfilled') {
+        applyConfig(configResult.value);
+        found.push('config.json');
+        if (!parseCount($('totalParams').value)) {
+          const estimate = estimateParamsFromConfig(configResult.value);
+          if (estimate > 0) {
+            $('totalParams').value = formatCount(estimate);
+            warnings.push('Total parameters were estimated from config.json, not exact metadata.');
+          }
+        }
+      } else {
+        warnings.push('config.json fetch failed: ' + configResult.reason.message + '.');
+      }
+
+      lastFetchNotes = warnings;
+      const className = warnings.length ? 'warn' : 'ok';
+      $('fetchStatus').innerHTML = '<span class="' + className + '">' + escapeHtml(found.length ? 'Fetched ' + found.join(', ') + '.' : 'Fetch completed with warnings.') + '</span>' + (warnings.length ? '<div class="muted">' + escapeHtml(warnings.join(' ')) + '</div>' : '');
+      calculate();
+    }
+
+    function extractParameterCount(info) {
+      const st = info && info.safetensors;
+      if (!st) return 0;
+      if (Number.isFinite(st.total)) return Number(st.total);
+      if (st.parameters && typeof st.parameters === 'object') {
+        return Object.values(st.parameters).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      }
+      return 0;
+    }
+
+    function firstNumber(config, keys) {
+      for (const key of keys) {
+        const value = config && config[key];
+        if (Number.isFinite(value)) return Number(value);
+      }
+      return 0;
+    }
+
+    function applyConfig(config) {
+      const map = [
+        ['layers', ['num_hidden_layers', 'n_layer', 'num_layers']],
+        ['hiddenSize', ['hidden_size', 'n_embd', 'd_model', 'dim']],
+        ['attentionHeads', ['num_attention_heads', 'n_head', 'n_heads']],
+        ['kvHeads', ['num_key_value_heads', 'num_kv_heads', 'n_kv_heads']],
+        ['intermediateSize', ['intermediate_size', 'ffn_dim', 'hidden_dim', 'n_inner']],
+        ['vocabSize', ['vocab_size']]
+      ];
+      for (const [id, keys] of map) {
+        const value = firstNumber(config, keys);
+        if (value > 0) $(id).value = String(value);
+      }
+      const experts = firstNumber(config, ['num_local_experts', 'num_experts', 'n_routed_experts']);
+      if (experts > 0) {
+        $('moeEnabled').checked = true;
+        $('numExperts').value = String(experts);
+      }
+      const topK = firstNumber(config, ['num_experts_per_tok', 'num_experts_per_token', 'moe_top_k']);
+      if (topK > 0) $('topKExperts').value = String(topK);
+      if (!firstNumber(config, ['num_key_value_heads', 'num_kv_heads', 'n_kv_heads'])) {
+        $('kvHeads').value = $('attentionHeads').value;
+      }
+    }
+
+    function estimateParamsFromConfig(config) {
+      const hidden = firstNumber(config, ['hidden_size', 'n_embd', 'd_model', 'dim']);
+      const layers = firstNumber(config, ['num_hidden_layers', 'n_layer', 'num_layers']);
+      const heads = firstNumber(config, ['num_attention_heads', 'n_head', 'n_heads']);
+      const kvHeads = firstNumber(config, ['num_key_value_heads', 'num_kv_heads', 'n_kv_heads']) || heads;
+      const intermediate = firstNumber(config, ['intermediate_size', 'ffn_dim', 'hidden_dim', 'n_inner']);
+      const vocab = firstNumber(config, ['vocab_size']);
+      if (!hidden || !layers || !heads || !intermediate || !vocab) return 0;
+      const headDim = hidden / heads;
+      const kvDim = kvHeads * headDim;
+      const attn = hidden * hidden + 2 * hidden * kvDim + hidden * hidden;
+      const experts = firstNumber(config, ['num_local_experts', 'num_experts', 'n_routed_experts']);
+      const ffn = experts > 0 ? experts * 3 * hidden * intermediate + hidden * experts : 3 * hidden * intermediate;
+      const norms = 2 * hidden;
+      const tie = config.tie_word_embeddings !== false;
+      const embeddings = vocab * hidden * (tie ? 1 : 2);
+      return embeddings + layers * (attn + ffn + norms) + hidden;
+    }
+
+    document.querySelectorAll('.segmented button').forEach((button) => {
+      button.addEventListener('click', () => {
+        currentMethod = button.dataset.method;
+        document.querySelectorAll('.segmented button').forEach((node) => node.setAttribute('aria-pressed', String(node === button)));
+        calculate();
+      });
+    });
+
+    controls.forEach((id) => {
+      const node = $(id);
+      if (!node) return;
+      node.addEventListener('input', calculate);
+      node.addEventListener('change', calculate);
+    });
+    document.querySelectorAll('#targetChecks input').forEach((node) => node.addEventListener('change', calculate));
+    $('fetchBtn').addEventListener('click', fetchMetadata);
+    $('selectQv').addEventListener('click', () => setTargets(['q', 'v']));
+    $('selectAttention').addEventListener('click', () => setTargets(['q', 'k', 'v', 'o']));
+    $('selectAllLinear').addEventListener('click', () => setTargets(['q', 'k', 'v', 'o', 'gate', 'up', 'down']));
+
+    calculate();
+  </script>
+</body>
+</html>
