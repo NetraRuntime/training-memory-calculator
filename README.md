@@ -9,6 +9,9 @@ Activation memory is a cited approximation because it depends on the concrete
 Transformer implementation, attention kernel, checkpointing strategy, allocator,
 temporary buffers, and framework runtime.
 
+For plain-language explanations of every website input, result value, symbol,
+and technical term, see [GLOSSARY.md](GLOSSARY.md).
+
 ## Abstract
 
 Finetuning memory is dominated by two classes of tensors: model states and
@@ -35,6 +38,7 @@ The exact set of terms depends on the finetuning method:
   adapters through the quantized base.
 
 ## Scope
+
 - Dense decoder-only Transformers such as LLaMA, Mistral, Gemma, Qwen dense, and
   similar architectures.
 - Sparse mixture-of-experts models where total parameters and active parameters
